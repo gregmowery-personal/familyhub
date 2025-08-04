@@ -1,0 +1,28 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Leaves/Plant -->
+  <g>
+    <!-- Center stem -->
+    <path d="M50 25 L50 45" stroke="#87A89A" stroke-width="2" stroke-linecap="round"/>
+    
+    <!-- Left leaf -->
+    <path d="M50 30 Q35 25 30 35 Q35 45 50 40" fill="#C5DAD1" stroke="#87A89A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Right leaf -->
+    <path d="M50 30 Q65 25 70 35 Q65 45 50 40" fill="#C5DAD1" stroke="#87A89A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Top center leaf -->
+    <path d="M50 25 Q45 10 50 5 Q55 10 50 25" fill="#C5DAD1" stroke="#87A89A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  
+  <!-- House -->
+  <g>
+    <!-- Roof -->
+    <path d="M25 50 L50 30 L75 50" stroke="#444B59" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    
+    <!-- House body -->
+    <rect x="30" y="50" width="40" height="35" fill="#C5DAD1" stroke="#444B59" stroke-width="3" stroke-linejoin="round"/>
+    
+    <!-- Door -->
+    <rect x="44" y="65" width="12" height="20" fill="#87A89A" stroke="#444B59" stroke-width="2"/>
+  </g>
+</svg>
