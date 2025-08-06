@@ -782,9 +782,12 @@ test.describe('Authentication Security Testing', () => {
         '123456',
         'qwerty',
         'letmein',
-        'admin',
+        'family_coordinator',  // No longer using 'admin' role
         testUsers.valid.firstName.toLowerCase(), // Name-based password
-        testUsers.valid.email.split('@')[0] // Email-based password
+        testUsers.valid.email.split('@')[0], // Email-based password
+        'admin', // Old role name should be rejected as weak password
+        'system_admin', // Role names should not be passwords
+        'family_coordinator' // Role names should not be passwords
       ];
       
       for (const weakPassword of weakPasswords) {

@@ -73,7 +73,7 @@ describe('RBAC Security Tests', () => {
     mockSecurityService = {
       async detectPrivilegeEscalation(userId, attemptedAction) {
         // Detect if user is trying to access actions above their privilege level
-        if (userId.includes('viewer') && attemptedAction.includes('admin')) {
+        if (userId.includes('viewer') && (attemptedAction.includes('family_coordinator') || attemptedAction.includes('system_admin'))) {
           return true; // Privilege escalation detected
         }
         return false;
@@ -124,7 +124,7 @@ describe('RBAC Security Tests', () => {
         }
         
         // Check if user should have access to sensitive fields
-        const hasAccess = userId.includes('admin') || userId.includes('caregiver');
+        const hasAccess = userId.includes('family_coordinator') || userId.includes('system_admin') || userId.includes('caregiver');
         
         return {
           allowed: hasAccess,
@@ -176,7 +176,7 @@ describe('RBAC Security Tests', () => {
         const securityFlags: string[] = [];
         
         // Check for suspicious patterns
-        if (context?.ipAddress === '127.0.0.1' && action.includes('admin')) {
+        if (context?.ipAddress === '127.0.0.1' && (action.includes('family_coordinator') || action.includes('system_admin'))) {
           securityFlags.push('localhost_admin_access');
         }
         
@@ -188,7 +188,7 @@ describe('RBAC Security Tests', () => {
         let allowed = false;
         let reason = 'NO_PERMISSION';
         
-        if (userId.includes('admin')) {
+        if (userId.includes('family_coordinator') || userId.includes('system_admin')) {
           allowed = true;
           reason = 'ADMIN_ACCESS';
         } else if (userId.includes('caregiver') && action.startsWith('schedule')) {
@@ -259,11 +259,11 @@ describe('RBAC Security Tests', () => {
       const maliciousUserId = 'malicious-user-123';
       const context = createSecurityContext(maliciousUserId);
 
-      // Attempt to delegate admin privileges
+      // Attempt to delegate family_coordinator privileges
       const result = await mockAuthService.authorize(
         maliciousUserId,
-        'delegation.create.admin',
-        'admin-role-1',
+        'delegation.create.family_coordinator',
+        'family-coordinator-role-1',
         'role',
         context
       );
@@ -272,7 +272,7 @@ describe('RBAC Security Tests', () => {
     });
 
     test('should validate role boundaries in multi-tenant scenarios', async () => {
-      const tenant1User = 'tenant1-admin-123';
+      const tenant1User = 'tenant1-family-coordinator-123';
       const tenant2Resource = 'tenant2-sensitive-data';
 
       const isValid = await mockSecurityService.enforceDataResidency(tenant1User, tenant2Resource);

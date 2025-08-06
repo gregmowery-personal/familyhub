@@ -129,7 +129,7 @@ describe('PermissionCache', () => {
       // Set cache entries
       await cache.set('user:123:read:doc1', { allowed: true, reason: 'TEST' }, 60)
       await cache.set('user:456:read:doc1', { allowed: true, reason: 'TEST' }, 60)
-      await cache.set('role:admin:permissions', { allowed: true, reason: 'TEST' }, 60)
+      await cache.set('role:family_coordinator:permissions', { allowed: true, reason: 'TEST' }, 60)
 
       // Invalidate multiple patterns
       await cache.invalidateMultiple(['user:123:*', 'user:456:*'])
@@ -137,7 +137,7 @@ describe('PermissionCache', () => {
       // Check results
       expect(await cache.get('user:123:read:doc1')).toBeNull()
       expect(await cache.get('user:456:read:doc1')).toBeNull()
-      expect(await cache.get('role:admin:permissions')).not.toBeNull() // Should remain
+      expect(await cache.get('role:family_coordinator:permissions')).not.toBeNull() // Should remain
     })
   })
 

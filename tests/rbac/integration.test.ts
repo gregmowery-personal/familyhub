@@ -88,7 +88,7 @@ describe('RBAC Integration Tests', () => {
 
       async authorize(userId, action, resourceId, resourceType) {
         // Mock authorization with realistic logic
-        if (userId.includes('admin')) {
+        if (userId.includes('family_coordinator') || userId.includes('system_admin')) {
           return { allowed: true, reason: 'ADMIN_ACCESS' };
         }
         if (userId.includes('caregiver') && action.startsWith('schedule')) {
@@ -148,14 +148,14 @@ describe('RBAC Integration Tests', () => {
 
   describe('End-to-End User Workflows', () => {
     test('should handle complete family setup workflow', async () => {
-      // 1. Create family admin
-      const admin = await mockRBACSystem.createUser({
-        email: 'admin@family.com',
+      // 1. Create family coordinator
+      const familyCoordinator = await mockRBACSystem.createUser({
+        email: 'family-coordinator@family.com',
         familyId: testFamily.id
       });
 
-      // 2. Assign admin role
-      await mockRBACSystem.assignRole(admin.id, 'admin', {
+      // 2. Assign family_coordinator role (formerly admin)
+      await mockRBACSystem.assignRole(familyCoordinator.id, 'family_coordinator', {
         scope: { type: 'family', entityId: testFamily.id }
       });
 
@@ -239,14 +239,14 @@ describe('RBAC Integration Tests', () => {
         }
       );
 
-      // 2. Family admin approves delegation
-      const admin = await mockRBACSystem.createUser({
-        email: 'admin@family.com',
+      // 2. Family coordinator approves delegation
+      const familyCoordinator2 = await mockRBACSystem.createUser({
+        email: 'family-coordinator@family.com',
         familyId: testFamily.id
       });
-      await mockRBACSystem.assignRole(admin.id, 'admin', {});
+      await mockRBACSystem.assignRole(familyCoordinator.id, 'family_coordinator', {});
 
-      await mockRBACSystem.approveDelegation(delegationId, admin.id);
+      await mockRBACSystem.approveDelegation(delegationId, familyCoordinator2.id);
 
       // 3. Verify delegation is working
       // (In a real system, we'd check date bounds and active delegations)

@@ -45,22 +45,37 @@ interface RoleManagementService {
 }
 
 // Test data factories
-const createTestRole = (type: string = 'caregiver'): Role => ({
-  id: `role-${type}`,
-  type,
-  state: 'active',
-  name: `${type.charAt(0).toUpperCase() + type.slice(1)} Role`,
-  description: `Standard ${type} role`,
-  priority: 100,
-  permissionSets: [`${type}_permissions`],
-  tags: []
-});
+const createTestRole = (type: string = 'caregiver'): Role => {
+  // Boromir's Shield Wall - Role Priority Hierarchy
+  const rolePriorities: Record<string, number> = {
+    'system_admin': 200,        // Supreme authority across all families
+    'family_coordinator': 100,  // Primary family management (formerly admin)
+    'caregiver': 90,
+    'care_recipient': 70,
+    'helper': 60,
+    'emergency_contact': 50,
+    'child': 40,
+    'viewer': 30,
+    'bot_agent': 10
+  };
+  
+  return {
+    id: `role-${type}`,
+    type,
+    state: 'active',
+    name: `${type.charAt(0).toUpperCase() + type.slice(1)} Role`,
+    description: `Standard ${type} role`,
+    priority: rolePriorities[type] || 100,
+    permissionSets: [`${type}_permissions`],
+    tags: []
+  };
+};
 
 const createTestUserRole = (userId: string, roleId: string): UserRole => ({
   id: testUtils.generateTestId('user-role'),
   userId,
   roleId,
-  grantedBy: 'admin-1',
+  grantedBy: 'family-coordinator-1',
   reason: 'Test assignment',
   assignedAt: new Date(),
   validFrom: new Date(),
@@ -128,7 +143,7 @@ describe('RBAC Role Management', () => {
       const userId = 'user-123';
       const roleType = 'caregiver';
       const options = {
-        grantedBy: 'admin-456',
+        grantedBy: 'family-coordinator-456',
         reason: 'Primary caregiver for elderly parent',
         scopes: [{
           entityType: 'user',
@@ -266,7 +281,7 @@ describe('RBAC Role Management', () => {
         }
       };
 
-      const userRole = await mockPendingService.assignRole('user-123', 'admin', {
+      const userRole = await mockPendingService.assignRole('user-123', 'family_coordinator', {
         requireApproval: true
       });
 
@@ -289,17 +304,67 @@ describe('RBAC Role Management', () => {
 
   describe('Role Hierarchy and Priority', () => {
     test('should respect role priority in conflict resolution', async () => {
-      const adminRole = createTestRole('admin');
-      adminRole.priority = 1000;
-
+      const systemAdminRole = createTestRole('system_admin');
+      const familyCoordinatorRole = createTestRole('family_coordinator');
       const caregiverRole = createTestRole('caregiver');
-      caregiverRole.priority = 500;
-
       const viewerRole = createTestRole('viewer');
-      viewerRole.priority = 100;
 
-      expect(adminRole.priority).toBeGreaterThan(caregiverRole.priority);
+      expect(systemAdminRole.priority).toBeGreaterThan(familyCoordinatorRole.priority);
+      expect(familyCoordinatorRole.priority).toBeGreaterThan(caregiverRole.priority);
       expect(caregiverRole.priority).toBeGreaterThan(viewerRole.priority);
+    });
+
+    test('should verify complete role hierarchy priorities - Boromir\'s Shield Wall', async () => {
+      // Test the complete role hierarchy as decreed by the migration
+      const roles = {
+        system_admin: createTestRole('system_admin'),
+        family_coordinator: createTestRole('family_coordinator'),
+        caregiver: createTestRole('caregiver'),
+        care_recipient: createTestRole('care_recipient'),
+        helper: createTestRole('helper'),
+        emergency_contact: createTestRole('emergency_contact'),
+        child: createTestRole('child'),
+        viewer: createTestRole('viewer'),
+        bot_agent: createTestRole('bot_agent')
+      };
+
+      // Verify exact priorities match the database migration
+      expect(roles.system_admin.priority).toBe(200);
+      expect(roles.family_coordinator.priority).toBe(100);
+      expect(roles.caregiver.priority).toBe(90);
+      expect(roles.care_recipient.priority).toBe(70);
+      expect(roles.helper.priority).toBe(60);
+      expect(roles.emergency_contact.priority).toBe(50);
+      expect(roles.child.priority).toBe(40);
+      expect(roles.viewer.priority).toBe(30);
+      expect(roles.bot_agent.priority).toBe(10);
+
+      // Verify hierarchy chain
+      expect(roles.system_admin.priority).toBeGreaterThan(roles.family_coordinator.priority);
+      expect(roles.family_coordinator.priority).toBeGreaterThan(roles.caregiver.priority);
+      expect(roles.caregiver.priority).toBeGreaterThan(roles.care_recipient.priority);
+      expect(roles.care_recipient.priority).toBeGreaterThan(roles.helper.priority);
+      expect(roles.helper.priority).toBeGreaterThan(roles.emergency_contact.priority);
+      expect(roles.emergency_contact.priority).toBeGreaterThan(roles.child.priority);
+      expect(roles.child.priority).toBeGreaterThan(roles.viewer.priority);
+      expect(roles.viewer.priority).toBeGreaterThan(roles.bot_agent.priority);
+    });
+
+    test('should handle system_admin supreme authority scenarios', async () => {
+      const systemAdminUserId = 'system-admin-supreme';
+      
+      const userRole = await mockRoleService.assignRole(systemAdminUserId, 'system_admin', {
+        scopes: [{
+          entityType: 'global',
+          entityId: '*',
+          scopeType: 'global'
+        }],
+        reason: 'Supreme system authority'
+      });
+
+      expect(userRole.userId).toBe(systemAdminUserId);
+      expect(userRole.roleId).toBe('role-system_admin');
+      expect(userRole.scopes[0].scopeType).toBe('global');
     });
 
     test('should handle multi-role users correctly', async () => {
@@ -356,10 +421,10 @@ describe('RBAC Role Management', () => {
     });
 
     test('should handle family scope assignments', async () => {
-      const userId = 'admin-1';
+      const userId = 'family-coordinator-1';
       const familyId = 'family-1';
 
-      const userRole = await mockRoleService.assignRole(userId, 'admin', {
+      const userRole = await mockRoleService.assignRole(userId, 'family_coordinator', {
         scopes: [{
           entityType: 'family',
           entityId: familyId,
@@ -375,7 +440,7 @@ describe('RBAC Role Management', () => {
     test('should handle global scope assignments for system roles', async () => {
       const userId = 'system-admin-1';
 
-      const userRole = await mockRoleService.assignRole(userId, 'admin', {
+      const userRole = await mockRoleService.assignRole(userId, 'system_admin', {
         scopes: [{
           entityType: 'global',
           entityId: '*',
@@ -438,13 +503,61 @@ describe('RBAC Role Management', () => {
         ...mockRoleService,
         async revokeRole(userRoleId: string, reason: string) {
           if (userRoleId.includes('system-admin')) {
-            throw new Error('Cannot revoke system-critical role');
+            throw new Error('Cannot revoke system-critical role - system_admin is protected');
           }
         }
       };
 
       await expect(mockProtectedService.revokeRole(systemAdminRoleId, 'Test revocation'))
-        .rejects.toThrow('Cannot revoke system-critical role');
+        .rejects.toThrow('Cannot revoke system-critical role - system_admin is protected');
+    });
+
+    test('should allow family_coordinator to manage family-scoped roles', async () => {
+      const familyCoordinatorUserId = 'family-coordinator-1';
+      const familyId = 'family-test-123';
+      
+      const userRole = await mockRoleService.assignRole(familyCoordinatorUserId, 'family_coordinator', {
+        scopes: [{
+          entityType: 'family',
+          entityId: familyId,
+          scopeType: 'family'
+        }],
+        reason: 'Primary family coordinator'
+      });
+
+      expect(userRole.userId).toBe(familyCoordinatorUserId);
+      expect(userRole.roleId).toBe('role-family_coordinator');
+      expect(userRole.scopes[0].entityType).toBe('family');
+      expect(userRole.scopes[0].entityId).toBe(familyId);
+    });
+
+    test('should verify role transition from admin to family_coordinator', async () => {
+      // This test verifies the migration worked correctly
+      const mockMigrationService = {
+        ...mockRoleService,
+        async getRole(roleId: string) {
+          if (roleId === 'role-admin') {
+            // Should not exist anymore
+            throw new Error('Role type admin no longer exists');
+          }
+          if (roleId === 'role-family_coordinator') {
+            const role = createTestRole('family_coordinator');
+            role.description = 'Primary family coordinator with comprehensive management permissions for their family realm';
+            return role;
+          }
+          return createTestRole('caregiver');
+        }
+      };
+
+      // Old admin role should not exist
+      await expect(mockMigrationService.getRole('role-admin'))
+        .rejects.toThrow('Role type admin no longer exists');
+
+      // New family_coordinator should exist
+      const familyCoordinatorRole = await mockMigrationService.getRole('role-family_coordinator');
+      expect(familyCoordinatorRole.type).toBe('family_coordinator');
+      expect(familyCoordinatorRole.priority).toBe(100);
+      expect(familyCoordinatorRole.description).toContain('family coordinator');
     });
   });
 

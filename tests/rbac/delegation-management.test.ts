@@ -142,19 +142,19 @@ describe('RBAC Delegation Management', () => {
 
     test('should create delegation with subset of permissions', async () => {
       const delegationData = {
-        fromUserId: 'admin-1',
-        toUserId: 'temp-admin-1',
-        roleId: 'role-admin',
-        permissions: ['schedule.read', 'schedule.write', 'task.create'], // Subset of admin permissions
+        fromUserId: 'family-coordinator-1',
+        toUserId: 'temp-family-coordinator-1',
+        roleId: 'role-family_coordinator',
+        permissions: ['schedule.read', 'schedule.write', 'task.create'], // Subset of family coordinator permissions
         validFrom: new Date(),
         validUntil: new Date(Date.now() + 4 * 60 * 60 * 1000), // 4 hours
-        reason: 'Limited admin access for event management'
+        reason: 'Limited family coordinator access for event management'
       };
 
       const delegation = await mockDelegationService.createDelegation(delegationData);
 
       expect(delegation.permissions).toEqual(['schedule.read', 'schedule.write', 'task.create']);
-      expect(delegation.roleId).toBe('role-admin');
+      expect(delegation.roleId).toBe('role-family_coordinator');
     });
 
     test('should create emergency delegation with immediate effect', async () => {

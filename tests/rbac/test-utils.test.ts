@@ -32,13 +32,26 @@ export class RBACTestUtils {
   }
 
   static createTestRole(type: string = 'caregiver', overrides: Partial<any> = {}) {
+    // Boromir's Shield Wall - Role Priority Hierarchy
+    const rolePriorities: Record<string, number> = {
+      'system_admin': 200,        // Supreme authority across all families
+      'family_coordinator': 100,  // Primary family management (formerly admin)
+      'caregiver': 90,
+      'care_recipient': 70,
+      'helper': 60,
+      'emergency_contact': 50,
+      'child': 40,
+      'viewer': 30,
+      'bot_agent': 10
+    };
+    
     return {
       id: this.generateId('role'),
       type,
       state: 'active',
       name: `${type.charAt(0).toUpperCase() + type.slice(1)} Role`,
       description: `Standard ${type} role`,
-      priority: 100,
+      priority: rolePriorities[type] || 100,
       permissionSets: [`${type}_permissions`],
       tags: [],
       ...overrides
@@ -84,7 +97,7 @@ export class RBACTestUtils {
       reason: 'medical_emergency' as const,
       durationMinutes: 60,
       grantedPermissions: ['medical.read', 'emergency.access'],
-      notifiedUsers: ['family-admin-1'],
+      notifiedUsers: ['family-coordinator-1'],
       activatedAt: new Date(),
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       justification: 'Test emergency override',
@@ -241,10 +254,10 @@ export class RBACTestUtils {
   // Test scenario builders
   static buildFamilyScenario(memberCount: number = 4) {
     const family = this.createTestFamily();
-    const admin = this.createTestUser({ 
+    const familyCoordinator = this.createTestUser({ 
       familyId: family.id, 
-      email: 'admin@family.com',
-      roles: ['admin']
+      email: 'family-coordinator@family.com',
+      roles: ['family_coordinator']
     });
     
     const careRecipient = this.createTestUser({ 
@@ -263,10 +276,10 @@ export class RBACTestUtils {
 
     return {
       family,
-      admin,
+      familyCoordinator,
       careRecipient,
       caregivers,
-      allMembers: [admin, careRecipient, ...caregivers]
+      allMembers: [familyCoordinator, careRecipient, ...caregivers]
     };
   }
 
@@ -466,6 +479,46 @@ describe('RBAC Test Utilities', () => {
       expect(role.type).toBe('caregiver');
       expect(role.state).toBe('active');
       expect(role.permissionSets).toContain('caregiver_permissions');
+      expect(role.priority).toBe(90); // Caregiver priority
+    });
+
+    test('should create system_admin role with supreme priority', () => {
+      const role = RBACTestUtils.createTestRole('system_admin');
+      
+      expect(role.type).toBe('system_admin');
+      expect(role.priority).toBe(200); // Supreme authority
+      expect(role.permissionSets).toContain('system_admin_permissions');
+    });
+
+    test('should create family_coordinator role with correct priority', () => {
+      const role = RBACTestUtils.createTestRole('family_coordinator');
+      
+      expect(role.type).toBe('family_coordinator');
+      expect(role.priority).toBe(100); // Family management authority
+      expect(role.permissionSets).toContain('family_coordinator_permissions');
+    });
+
+    test('should verify complete role priority hierarchy', () => {
+      const roles = [
+        RBACTestUtils.createTestRole('system_admin'),
+        RBACTestUtils.createTestRole('family_coordinator'),
+        RBACTestUtils.createTestRole('caregiver'),
+        RBACTestUtils.createTestRole('care_recipient'),
+        RBACTestUtils.createTestRole('helper'),
+        RBACTestUtils.createTestRole('emergency_contact'),
+        RBACTestUtils.createTestRole('child'),
+        RBACTestUtils.createTestRole('viewer'),
+        RBACTestUtils.createTestRole('bot_agent')
+      ];
+
+      // Sort by priority descending
+      roles.sort((a, b) => b.priority - a.priority);
+      
+      // Verify correct order
+      expect(roles[0].type).toBe('system_admin');
+      expect(roles[1].type).toBe('family_coordinator');
+      expect(roles[2].type).toBe('caregiver');
+      expect(roles[8].type).toBe('bot_agent');
     });
 
     test('should create valid test delegation', () => {
@@ -575,9 +628,9 @@ describe('RBAC Test Utilities', () => {
       const scenario = RBACTestUtils.buildFamilyScenario(4);
       
       expect(scenario.family).toBeDefined();
-      expect(scenario.admin).toBeDefined();
+      expect(scenario.familyCoordinator).toBeDefined();
       expect(scenario.careRecipient).toBeDefined();
-      expect(scenario.caregivers).toHaveLength(2); // 4 total - admin - care recipient
+      expect(scenario.caregivers).toHaveLength(2); // 4 total - family_coordinator - care recipient
       expect(scenario.allMembers).toHaveLength(4);
     });
 
@@ -604,7 +657,7 @@ describe('RBAC Test Utilities', () => {
     test('should validate valid RBAC configuration', () => {
       const validConfig = {
         roles: [
-          { id: 'role1', type: 'admin' }
+          { id: 'role1', type: 'family_coordinator' }
         ],
         permissions: [
           { id: 'perm1', resource: 'user', action: 'read' }
