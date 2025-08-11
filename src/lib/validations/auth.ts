@@ -7,14 +7,7 @@ export const emailSchema = z.string()
   .toLowerCase()
   .trim();
 
-// Password validation schema
-export const passwordSchema = z.string()
-  .min(8, 'Password must be at least 8 characters long')
-  .max(128, 'Password is too long')
-  .regex(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'
-  );
+// Password schema removed - going passwordless
 
 // Phone number validation schema
 export const phoneSchema = z.string()
@@ -37,39 +30,30 @@ export const deviceInfoSchema = z.object({
   browser_name: z.string().max(50).optional(),
 }).optional();
 
-// Signup validation schema
+// Signup validation schema - passwordless
 export const signupSchema = z.object({
   email: emailSchema,
-  password: passwordSchema,
   first_name: nameSchema.optional(),
   last_name: nameSchema.optional(),
   phone_number: phoneSchema,
   family_invitation_token: z.string().uuid().optional(),
 });
 
-// Login validation schema
+// Login validation schema - passwordless
 export const loginSchema = z.object({
   email: emailSchema,
-  password: z.string().min(1, 'Password is required'),
   device_info: deviceInfoSchema,
 });
 
-// Forgot password validation schema
-export const forgotPasswordSchema = z.object({
-  email: emailSchema,
-  redirect_url: z.string().url().optional(),
-});
+// Password reset schemas removed - going passwordless
 
-// Reset password validation schema
-export const resetPasswordSchema = z.object({
-  token: z.string().min(1, 'Reset token is required'),
-  password: passwordSchema,
-});
-
-// Verify email validation schema
+// Verify email validation schema - supports both token and code
 export const verifyEmailSchema = z.object({
-  token: z.string().min(1, 'Verification token is required'),
-  type: z.enum(['signup', 'email_change']).optional(),
+  token: z.string().min(1, 'Verification token is required').optional(),
+  code: z.string().regex(/^\d{6}$/, 'Verification code must be 6 digits').optional(),
+  type: z.enum(['signup', 'email_change']).optional().default('signup'),
+}).refine(data => data.token || data.code, {
+  message: 'Either token or code is required'
 });
 
 // Refresh token validation schema
@@ -182,8 +166,7 @@ export const auditEventSchema = z.object({
 // Export all validation types
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
-export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
-export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+// Password reset types removed - going passwordless
 export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type SocialAuthInput = z.infer<typeof socialAuthSchema>;

@@ -65,10 +65,10 @@ export async function GET(request: NextRequest) {
       const familiesWithDetails = await Promise.all(
         families.map(async (family: Family & { role?: string; is_family_admin?: boolean }) => {
           const { data: memberCount } = await supabase
-            .from('family_members')
+            .from('family_memberships')
             .select('id', { count: 'exact' })
             .eq('family_id', family.id)
-            .is('deleted_at', null);
+            .eq('status', 'active');
 
           return {
             ...family,

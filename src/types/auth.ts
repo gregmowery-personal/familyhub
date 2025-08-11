@@ -109,7 +109,6 @@ export interface SocialAuthProvider {
 // API Request/Response Types
 export interface SignupRequest {
   email: string;
-  password: string;
   first_name?: string;
   last_name?: string;
   phone_number?: string;
@@ -124,7 +123,6 @@ export interface SignupResponse {
 
 export interface LoginRequest {
   email: string;
-  password: string;
   device_info?: {
     device_id?: string;
     device_name?: string;
@@ -141,15 +139,7 @@ export interface LoginResponse {
   families?: Array<Family & { family_members: FamilyMember[] }>;
 }
 
-export interface ForgotPasswordRequest {
-  email: string;
-  redirect_url?: string;
-}
-
-export interface ResetPasswordRequest {
-  token: string;
-  password: string;
-}
+// Password-related interfaces removed - going passwordless
 
 export interface VerifyEmailRequest {
   token: string;

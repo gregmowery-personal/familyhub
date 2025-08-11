@@ -2,8 +2,7 @@ import {
   LoginRequest, 
   LoginResponse, 
   SignupRequest, 
-  SignupResponse, 
-  ForgotPasswordRequest,
+  SignupResponse,
   ApiResponse
 } from '@/types/auth';
 
@@ -54,7 +53,7 @@ export class AuthService {
   }
 
   /**
-   * Login user with email and password
+   * Login user with email (passwordless)
    */
   static async login(credentials: LoginRequest): Promise<ApiResponse<LoginResponse>> {
     return this.makeRequest<LoginResponse>('/login', {
@@ -80,18 +79,6 @@ export class AuthService {
     });
   }
 
-  /**
-   * Request password reset
-   */
-  static async forgotPassword(data: ForgotPasswordRequest): Promise<ApiResponse<{ email_sent: boolean; message: string }>> {
-    return this.makeRequest('/forgot-password', {
-      method: 'POST',
-      body: JSON.stringify({
-        ...data,
-        redirect_url: data.redirect_url || `${window.location.origin}/auth/reset-password`,
-      }),
-    });
-  }
 
   /**
    * Logout user
@@ -158,15 +145,7 @@ export class AuthService {
     });
   }
 
-  /**
-   * Reset password with token
-   */
-  static async resetPassword(token: string, newPassword: string): Promise<ApiResponse<void>> {
-    return this.makeRequest<void>('/reset-password', {
-      method: 'POST',
-      body: JSON.stringify({ token, password: newPassword }),
-    });
-  }
+  // Password reset removed - going passwordless
 }
 
 /**
@@ -174,10 +153,10 @@ export class AuthService {
  */
 export function formatAuthError(error: { code: string; message: string }): string {
   const userFriendlyMessages: Record<string, string> = {
-    'INVALID_CREDENTIALS': 'Invalid email or password. Please check your credentials and try again.',
+    'INVALID_CREDENTIALS': 'Invalid email address. Please check your email and try again.',
     'EMAIL_NOT_VERIFIED': 'Please verify your email address before signing in. Check your inbox for a verification link.',
     'USER_ALREADY_EXISTS': 'An account with this email address already exists. Try signing in instead.',
-    'WEAK_PASSWORD': 'Password is too weak. Please choose a stronger password with at least 8 characters, including uppercase, lowercase, and numbers.',
+    // Password-related errors removed
     'DISPOSABLE_EMAIL_BLOCKED': 'Please use a valid email address from a recognized email provider.',
     'TOO_MANY_REQUESTS': 'Too many attempts. Please wait before trying again.',
     'ACCOUNT_LOCKED': 'Account temporarily locked due to suspicious activity. Please try again later.',

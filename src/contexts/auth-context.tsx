@@ -18,18 +18,16 @@ interface AuthContextType {
   isAuthenticated: boolean;
 
   // Actions
-  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<{ success: boolean; error?: string }>;
+  signIn: (email: string, rememberMe?: boolean) => Promise<{ success: boolean; error?: string }>;
   signUp: (userData: {
     email: string;
-    password: string;
     firstName?: string;
     lastName?: string;
     phoneNumber?: string;
     acceptTerms: boolean;
     subscribeNewsletter?: boolean;
-  }) => Promise<{ success: boolean; error?: string }>;
+  }) => Promise<{ success: boolean; error?: string; recovery_code?: string }>;
   signOut: () => Promise<void>;
-  forgotPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   refreshSession: () => Promise<void>;
   clearError: () => void;
 }
@@ -55,6 +53,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionInfo, setSessionInfo] = useState<UserSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sessionExpiryWarning, setSessionExpiryWarning] = useState(false);
   const router = useRouter();
 
   const supabase = createClient();
@@ -107,16 +106,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [supabase.auth, clearAuthState]);
 
-  // Sign in function
+  // Sign in function - passwordless
   const signIn = useCallback(async (
     email: string, 
-    password: string, 
     rememberMe = false
   ): Promise<{ success: boolean; error?: string }> => {
     try {
+      const securityContext = null; // Would come from getSecurityContext in production
+      
       const response = await AuthService.login({
         email,
-        password,
         device_info: {
           device_type: 'web',
           browser_name: navigator.userAgent.split(' ').slice(-1)[0] || 'Unknown',
@@ -140,9 +139,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setSession(session);
         }
 
-        // Handle remember me
+        // Handle remember me - extends session to 7 days
         if (rememberMe) {
           localStorage.setItem('familyhub_remember_me', 'true');
+          
+          // Create extended session record
+          const { error: extensionError } = await supabase
+            .from('session_extensions')
+            .insert({
+              user_id: response.data.user.id,
+              session_token: sessionData.access_token,
+              expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+              ip_address: securityContext?.ip_address,
+              user_agent: navigator.userAgent,
+              is_trusted_device: true,
+            });
+            
+          if (extensionError) {
+            console.error('Failed to create session extension:', extensionError);
+          }
         } else {
           localStorage.removeItem('familyhub_remember_me');
         }
@@ -166,7 +181,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Sign up function
   const signUp = useCallback(async (userData: {
     email: string;
-    password: string;
     firstName?: string;
     lastName?: string;
     phoneNumber?: string;
@@ -176,7 +190,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const response = await AuthService.signup({
         email: userData.email,
-        password: userData.password,
         first_name: userData.firstName,
         last_name: userData.lastName,
         phone_number: userData.phoneNumber,
@@ -196,7 +209,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setSession(session);
         }
 
-        return { success: true };
+        return { 
+          success: true,
+          recovery_code: response.data.recovery_code // Pass recovery code through
+        };
       } else {
         return { 
           success: false, 
@@ -237,27 +253,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [supabase.auth, clearAuthState, router]);
 
-  // Forgot password function
-  const forgotPassword = useCallback(async (email: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const response = await AuthService.forgotPassword({ email });
-      
-      if (response.success) {
-        return { success: true };
-      } else {
-        return { 
-          success: false, 
-          error: response.error?.message || 'Failed to send reset email' 
-        };
-      }
-    } catch (error) {
-      console.error('Forgot password error:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'An unexpected error occurred' 
-      };
-    }
-  }, []);
 
   // Refresh session function
   const refreshSession = useCallback(async () => {
@@ -315,42 +310,55 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => subscription.unsubscribe();
   }, [supabase.auth, clearAuthState]);
 
-  // Auto-refresh session before expiry and handle session expiry
+  // Session management with 48-hour expiry and warnings
   useEffect(() => {
     if (!session) return;
 
     const now = Date.now();
-    const expiryTime = session.expires_at! * 1000;
-    const refreshTime = expiryTime - now - (5 * 60 * 1000); // 5 minutes before expiry
+    const rememberMe = localStorage.getItem('familyhub_remember_me') === 'true';
     
-    // If session is already expired, sign out immediately
+    // Check for extended session if Remember Me is enabled
+    const sessionDuration = rememberMe ? 7 * 24 * 60 * 60 * 1000 : 48 * 60 * 60 * 1000; // 7 days or 48 hours
+    const expiryTime = session.expires_at! * 1000;
+    const warningTime = expiryTime - (10 * 60 * 1000); // 10 minutes before expiry
+    const refreshTime = expiryTime - (5 * 60 * 1000); // 5 minutes before expiry
+    
+    // If session is already expired
     if (expiryTime <= now) {
-      console.log('Session expired, signing out...');
-      signOut();
+      console.log('Session expired');
+      setSessionExpiryWarning(true);
       return;
     }
 
-    // Set up auto-refresh
-    if (refreshTime > 0) {
+    // Set up warning notification
+    const warningTimeout = setTimeout(() => {
+      setSessionExpiryWarning(true);
+    }, Math.max(0, warningTime - now));
+
+    // Set up auto-refresh for Remember Me users
+    if (rememberMe && refreshTime > now) {
       const refreshTimeout = setTimeout(() => {
         refreshSession();
-      }, refreshTime);
-
-      // Set up auto-logout fallback (in case refresh fails)
-      const logoutTimeout = setTimeout(() => {
-        console.log('Session expired, auto-logout triggered');
-        signOut();
-      }, expiryTime - now + 1000); // 1 second after expiry
+      }, refreshTime - now);
 
       return () => {
+        clearTimeout(warningTimeout);
         clearTimeout(refreshTimeout);
-        clearTimeout(logoutTimeout);
       };
-    } else {
-      // Session expires soon, try immediate refresh
-      refreshSession();
     }
-  }, [session, refreshSession, signOut]);
+
+    // Set up session expiry
+    const expiryTimeout = setTimeout(() => {
+      if (!rememberMe) {
+        setSessionExpiryWarning(true);
+      }
+    }, Math.max(0, expiryTime - now));
+
+    return () => {
+      clearTimeout(warningTimeout);
+      clearTimeout(expiryTimeout);
+    };
+  }, [session, refreshSession]);
 
   const value: AuthContextType = {
     user,
@@ -360,10 +368,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     sessionInfo,
     isLoading,
     isAuthenticated,
+    sessionExpiryWarning,
     signIn,
     signUp,
     signOut,
-    forgotPassword,
     refreshSession,
     clearError,
   };

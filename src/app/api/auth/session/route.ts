@@ -42,25 +42,32 @@ export async function GET(request: NextRequest) {
     
     const supabase = await createClient();
     
-    // Get current session from Supabase
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    // Get current authenticated user (more secure than getSession)
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     
-    if (sessionError) {
-      console.error('Error getting session:', sessionError instanceof Error ? sessionError.message : "Unknown error");
+    // Get session only if user is authenticated
+    const { data: { session }, error: sessionError } = user 
+      ? await supabase.auth.getSession()
+      : { data: { session: null }, error: null };
+    
+    if (authError || sessionError) {
+      console.error('Error getting user/session:', authError?.message || sessionError?.message || "Unknown error");
       
-      await logAuditEvent(
-        'session_check_error',
-        'authentication',
-        'Error checking session',
-        {
-          eventData: {
-            error: sessionError.message,
-          },
-          severity: 'low',
-          success: false,
-          securityContext,
-        }
-      );
+      if (authError) {
+        await logAuditEvent(
+          'session_check_error',
+          'authentication',
+          'Error checking session',
+          {
+            eventData: {
+              error: authError.message,
+            },
+            severity: 'low',
+            success: false,
+            securityContext,
+          }
+        );
+      }
       
       return createSuccessResponse(
         {
@@ -77,7 +84,7 @@ export async function GET(request: NextRequest) {
     }
 
     // No active session
-    if (!session || !session.user) {
+    if (!user || !session || !session.user) {
       return createSuccessResponse(
         {
           authenticated: false,

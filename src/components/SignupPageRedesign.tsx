@@ -6,13 +6,12 @@ import { useAuth } from '@/contexts/auth-context';
 import { formatAuthError } from '@/lib/auth-service';
 import LoadingButton from './LoadingButton';
 import AlertMessage from './AlertMessage';
+import RecoverySetup from './auth/RecoverySetup';
 
 interface SignupFormData {
   firstName: string;
   lastName: string;
   email: string;
-  password: string;
-  confirmPassword: string;
   acceptTerms: boolean;
   subscribeNewsletter: boolean;
 }
@@ -22,16 +21,15 @@ export default function SignupPageRedesign() {
     firstName: '',
     lastName: '',
     email: '',
-    password: '',
-    confirmPassword: '',
     acceptTerms: false,
     subscribeNewsletter: false,
   });
   const [errors, setErrors] = useState<Partial<Record<keyof SignupFormData, string>>>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [generalError, setGeneralError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showRecoverySetup, setShowRecoverySetup] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
   
   const router = useRouter();
   const { signUp } = useAuth();
@@ -51,18 +49,6 @@ export default function SignupPageRedesign() {
       newErrors.email = 'Email is required';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       newErrors.email = 'Please enter a valid email address';
-    }
-    
-    if (!formData.password) {
-      newErrors.password = 'Password is required';
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
-    }
-    
-    if (!formData.confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password';
-    } else if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
     }
     
     if (!formData.acceptTerms) {
@@ -98,7 +84,6 @@ export default function SignupPageRedesign() {
     try {
       const result = await signUp({
         email: formData.email,
-        password: formData.password,
         firstName: formData.firstName,
         lastName: formData.lastName,
         acceptTerms: formData.acceptTerms,
@@ -106,10 +91,17 @@ export default function SignupPageRedesign() {
       });
       
       if (result.success) {
-        setSuccess('Welcome to FamilyHub! Redirecting you to sign in...');
-        setTimeout(() => {
-          router.push('/auth?mode=login');
-        }, 2000);
+        // Check if recovery code was returned from signup
+        if (result.recovery_code) {
+          setRecoveryCode(result.recovery_code);
+          setShowRecoverySetup(true);
+        } else {
+          // If no recovery code, proceed to email verification
+          setSuccess('Account created! Redirecting to complete setup...');
+          setTimeout(() => {
+            router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`);
+          }, 1500);
+        }
       } else {
         setGeneralError(formatAuthError({ 
           code: 'SIGNUP_FAILED', 
@@ -124,13 +116,45 @@ export default function SignupPageRedesign() {
     }
   };
 
+  const handleRecoveryComplete = (backupEmail?: string) => {
+    // Store backup email if provided
+    if (backupEmail) {
+      // This would be sent to the API to store
+    }
+    
+    // Redirect to email verification
+    router.push(`/verify-email?email=${encodeURIComponent(formData.email)}`);
+  };
+
+  if (showRecoverySetup && recoveryCode) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/30 to-emerald-50/20 flex items-center justify-center p-4">
+        <div className="w-full max-w-7xl">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-slate-800 mb-2">Secure Your Account</h1>
+            <p className="text-slate-600">Set up recovery options to ensure you never lose access</p>
+          </div>
+          <RecoverySetup 
+            recoveryCode={recoveryCode}
+            onComplete={handleRecoveryComplete}
+            userEmail={formData.email}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/30 to-emerald-50/20 flex items-center justify-center p-4">
+      {/* Skip to main content link for screen readers */}
+      <a href="#signup-form" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-white px-4 py-2 rounded-lg shadow-lg z-50">
+        Skip to signup form
+      </a>
       <div className="w-full max-w-7xl">
         <div className="grid lg:grid-cols-2 gap-0 bg-white rounded-3xl shadow-xl overflow-hidden">
           
           {/* LEFT SIDE - Brand & Welcome */}
-          <div className="bg-gradient-to-br from-purple-50 via-emerald-50/40 to-slate-50 p-12 lg:p-16 flex flex-col justify-center">
+          <div className="hidden lg:flex bg-gradient-to-br from-purple-50 via-emerald-50/40 to-slate-50 p-12 lg:p-16 flex-col justify-center" aria-hidden="true">
             {/* Logo */}
             <div className="mb-10">
               <div className="flex items-center gap-4">
@@ -230,13 +254,13 @@ export default function SignupPageRedesign() {
                 <p className="text-sm text-slate-600 italic">
                   "Finally, a simple way to keep our whole family on the same page."
                 </p>
-                <p className="text-sm text-slate-500 mt-2">— Sarah M., caring for her parents</p>
+                <p className="text-sm text-slate-600 mt-2">— Sarah M., caring for her parents</p>
               </div>
             </div>
           </div>
 
           {/* RIGHT SIDE - Sign Up Form */}
-          <div className="p-12 lg:p-16 bg-white">
+          <div className="p-8 sm:p-12 lg:p-16 bg-white">
             <div className="max-w-md mx-auto">
               {/* Form Header */}
               <div className="text-center mb-8">
@@ -250,14 +274,14 @@ export default function SignupPageRedesign() {
 
               {/* Success Message */}
               {success && (
-                <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl" role="status" aria-live="polite">
                   <p className="text-emerald-800 text-sm font-medium">{success}</p>
                 </div>
               )}
 
               {/* Error Message */}
               {generalError && (
-                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl" role="alert" aria-live="assertive">
                   <p className="text-red-800 text-sm font-medium">{generalError}</p>
                 </div>
               )}
@@ -288,14 +312,14 @@ export default function SignupPageRedesign() {
                       <div className="w-full border-t border-slate-200"></div>
                     </div>
                     <div className="relative flex justify-center text-sm">
-                      <span className="px-4 bg-white text-slate-500">or sign up with email</span>
+                      <span className="px-4 bg-white text-slate-600">or sign up with email</span>
                     </div>
                   </div>
                 </>
               )}
 
               {/* Sign Up Form */}
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form id="signup-form" onSubmit={handleSubmit} className="space-y-5" aria-label="Sign up form">
                 {/* Name Fields */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -308,14 +332,14 @@ export default function SignupPageRedesign() {
                       type="text"
                       value={formData.firstName}
                       onChange={handleInputChange}
-                      className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 ${
+                      className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 text-base ${
                         errors.firstName ? 'border-red-300 bg-red-50/50' : 'border-slate-200'
                       }`}
                       placeholder="Jane"
                       required
                     />
                     {errors.firstName && (
-                      <p className="mt-1 text-sm text-red-600">{errors.firstName}</p>
+                      <p className="mt-1 text-sm text-red-600" role="alert" aria-live="polite">{errors.firstName}</p>
                     )}
                   </div>
                   <div>
@@ -328,14 +352,14 @@ export default function SignupPageRedesign() {
                       type="text"
                       value={formData.lastName}
                       onChange={handleInputChange}
-                      className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 ${
+                      className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 text-base ${
                         errors.lastName ? 'border-red-300 bg-red-50/50' : 'border-slate-200'
                       }`}
                       placeholder="Smith"
                       required
                     />
                     {errors.lastName && (
-                      <p className="mt-1 text-sm text-red-600">{errors.lastName}</p>
+                      <p className="mt-1 text-sm text-red-600" role="alert" aria-live="polite">{errors.lastName}</p>
                     )}
                   </div>
                 </div>
@@ -351,77 +375,17 @@ export default function SignupPageRedesign() {
                     type="email"
                     value={formData.email}
                     onChange={handleInputChange}
-                    className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 ${
+                    className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 text-base ${
                       errors.email ? 'border-red-300 bg-red-50/50' : 'border-slate-200'
                     }`}
                     placeholder="jane@example.com"
                     required
                   />
                   {errors.email && (
-                    <p className="mt-1 text-sm text-red-600">{errors.email}</p>
+                    <p className="mt-1 text-sm text-red-600" role="alert" aria-live="polite">{errors.email}</p>
                   )}
                 </div>
 
-                {/* Password Fields */}
-                <div>
-                  <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1.5">
-                    Create password
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="password"
-                      name="password"
-                      type={showPassword ? 'text' : 'password'}
-                      value={formData.password}
-                      onChange={handleInputChange}
-                      className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 pr-12 ${
-                        errors.password ? 'border-red-300 bg-red-50/50' : 'border-slate-200'
-                      }`}
-                      placeholder="Minimum 8 characters"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
-                    >
-                      {showPassword ? (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6 6m3.878 3.878l4.242 4.242m0 0L18 18" />
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                  {errors.password && (
-                    <p className="mt-1 text-sm text-red-600">{errors.password}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-1.5">
-                    Confirm password
-                  </label>
-                  <input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type={showPassword ? 'text' : 'password'}
-                    value={formData.confirmPassword}
-                    onChange={handleInputChange}
-                    className={`w-full px-4 py-3 bg-slate-50 border rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-colors text-slate-800 ${
-                      errors.confirmPassword ? 'border-red-300 bg-red-50/50' : 'border-slate-200'
-                    }`}
-                    placeholder="Re-enter your password"
-                    required
-                  />
-                  {errors.confirmPassword && (
-                    <p className="mt-1 text-sm text-red-600">{errors.confirmPassword}</p>
-                  )}
-                </div>
 
                 {/* Checkboxes */}
                 <div className="space-y-3 pt-2">
@@ -431,7 +395,7 @@ export default function SignupPageRedesign() {
                       name="acceptTerms"
                       checked={formData.acceptTerms}
                       onChange={handleInputChange}
-                      className="mt-1 w-4 h-4 text-purple-600 bg-slate-50 border-slate-300 rounded focus:ring-purple-500/20 focus:ring-2"
+                      className="mt-1 w-5 h-5 text-purple-600 bg-slate-50 border-slate-300 rounded focus:ring-purple-500/20 focus:ring-2 cursor-pointer"
                       required
                     />
                     <span className="text-sm text-slate-600 group-hover:text-slate-800">
@@ -446,7 +410,7 @@ export default function SignupPageRedesign() {
                     </span>
                   </label>
                   {errors.acceptTerms && (
-                    <p className="ml-7 text-sm text-red-600">{errors.acceptTerms}</p>
+                    <p className="ml-7 text-sm text-red-600" role="alert" aria-live="polite">{errors.acceptTerms}</p>
                   )}
 
                   <label className="flex items-start gap-3 cursor-pointer group">
@@ -455,7 +419,7 @@ export default function SignupPageRedesign() {
                       name="subscribeNewsletter"
                       checked={formData.subscribeNewsletter}
                       onChange={handleInputChange}
-                      className="mt-1 w-4 h-4 text-purple-600 bg-slate-50 border-slate-300 rounded focus:ring-purple-500/20 focus:ring-2"
+                      className="mt-1 w-5 h-5 text-purple-600 bg-slate-50 border-slate-300 rounded focus:ring-purple-500/20 focus:ring-2 cursor-pointer"
                     />
                     <span className="text-sm text-slate-600 group-hover:text-slate-800">
                       Send me helpful caregiving tips and product updates (optional)

@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { signupSchema } from '@/lib/validations/auth';
+import { emailService } from '@/lib/email/prototype-email-service';
+import crypto from 'crypto';
 import { 
   withAuth, 
   createErrorResponse, 
@@ -13,7 +15,6 @@ import {
   logAuditEvent,
   sanitizeEmail,
   isDisposableEmail,
-  calculatePasswordStrength,
   verifyAndConsumeToken
 } from '@/lib/auth/utils';
 import { rateLimiter } from '@/lib/auth/rate-limit';
@@ -73,15 +74,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check password strength
-    const passwordStrength = calculatePasswordStrength(validatedData.password);
-    if (passwordStrength < 5) {
-      throw new AuthError(
-        'Password is too weak. Please choose a stronger password.',
-        'WEAK_PASSWORD',
-        400
-      );
-    }
+    // Password check removed - going passwordless
 
     const supabase = await createClient();
 
@@ -113,7 +106,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check if user already exists
+    // Check if user already exists (reuse adminClient below)
     const adminClient = createAdminClient();
     const { data: existingUsers } = await adminClient.auth.admin.listUsers();
     const foundUser = existingUsers?.users?.find(user => user.email === email);
@@ -133,18 +126,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create user with Supabase Auth
-    // Email verification disabled for development
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    // Create user with Supabase Auth using admin client (passwordless)
+    // CRITICAL: We must use admin API to avoid sending Supabase emails
+    // We use a random secure password that the user will never know or use
+    const tempPassword = crypto.randomBytes(32).toString('hex');
+    
+    // Use admin API to create user WITHOUT sending any emails
+    // CRITICAL: Set email_confirm to TRUE to prevent confirmation emails
+    const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
       email,
-      password: validatedData.password,
-      options: {
-        emailRedirectTo: undefined, // Disable email verification redirect
-        data: {
-          first_name: validatedData.first_name || null,
-          last_name: validatedData.last_name || null,
-          phone_number: validatedData.phone_number || null,
-        },
+      password: tempPassword, // This is never used - we're passwordless
+      email_confirm: true, // Set to TRUE to skip confirmation emails entirely
+      user_metadata: {
+        first_name: validatedData.first_name || null,
+        last_name: validatedData.last_name || null,
+        phone_number: validatedData.phone_number || null,
       },
     });
 
@@ -178,7 +174,79 @@ export async function POST(request: NextRequest) {
       throw new AuthError('Failed to create user account', 'USER_CREATION_FAILED', 500);
     }
 
+    // Use the userId from authData
     const userId = authData.user.id;
+    
+    // Generate recovery code (XXXXX-XXXXX format)
+    const generateRecoveryCode = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let code = '';
+      for (let i = 0; i < 10; i++) {
+        if (i === 5) code += '-';
+        code += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return code;
+    };
+    const recoveryCode = generateRecoveryCode();
+    
+    // Store recovery code in database
+    const { error: recoveryError } = await supabase
+      .from('recovery_codes')
+      .insert({
+        user_id: userId,
+        code_hash: crypto.createHash('sha256').update(recoveryCode).digest('hex'),
+        code_hint: recoveryCode.slice(-3),
+        is_active: true,
+        expires_at: new Date(Date.now() + 2 * 365 * 24 * 60 * 60 * 1000).toISOString() // 2 years
+      });
+    
+    if (recoveryError) {
+      console.error('Failed to store recovery code:', recoveryError);
+    }
+    
+    // Generate simple 6-digit verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationToken = crypto.randomUUID(); // Keep for backward compatibility
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 15); // 15 minute expiry for better security
+    
+    // Store verification in database
+    try {
+      const { error: verificationError } = await supabase
+        .from('email_verifications')
+        .insert({
+          user_id: userId,
+          email: email,
+          token: verificationToken,
+          verification_code: verificationCode,
+          type: 'signup',
+          expires_at: expiresAt.toISOString()
+        });
+        
+      if (verificationError) {
+        console.error('Failed to store verification code:', verificationError);
+      }
+      
+      // Log verification code to console for testing
+      console.log('\n✉️  EMAIL VERIFICATION CODE');
+      console.log('=====================================');
+      console.log(`📧 Email: ${email}`);
+      console.log(`\n🔢 VERIFICATION CODE: ${verificationCode}\n`);
+      console.log(`🔐 RECOVERY CODE: ${recoveryCode}`);
+      console.log(`\n⏱️  Verification expires in: 15 minutes`);
+      console.log(`⏱️  Recovery code expires in: 2 years`);
+      console.log('=====================================\n');
+      
+      // Send verification email with prominent code display
+      await emailService.sendVerificationCode({
+        email: email,
+        name: validatedData.first_name,
+        code: verificationCode
+      });
+    } catch (emailError) {
+      console.error('Failed to handle verification:', emailError);
+      // Don't fail signup if email/verification fails in prototype
+    }
 
     try {
       // Create user profile
@@ -204,19 +272,23 @@ export async function POST(request: NextRequest) {
       // Handle family invitation if present
       if (familyInvitation) {
         try {
+          // Get the appropriate role for the user
+          const { data: roleData } = await supabase
+            .from('roles')
+            .select('id')
+            .eq('type', familyInvitation.metadata?.invited_role || 'viewer')
+            .single();
+
           // Add user to family
           const { error: familyMemberError } = await supabase
-            .from('family_members')
+            .from('family_memberships')
             .insert({
               family_id: familyInvitation.family_id,
               user_id: userId,
-              role: familyInvitation.metadata?.invited_role || 'adult',
+              role_id: roleData?.id || '00000000-0000-0000-0000-000000000000', // Will need proper fallback
               relationship: familyInvitation.metadata?.relationship || null,
-              is_primary_contact: false,
-              is_emergency_contact: false,
-              is_family_admin: false,
-              access_level: 'full',
-              interface_preference: 'full',
+              display_name: null,
+              status: 'active'
             });
 
           if (familyMemberError) {
@@ -264,7 +336,6 @@ export async function POST(request: NextRequest) {
           eventData: {
             email,
             has_family_invitation: !!familyInvitation,
-            password_strength: passwordStrength,
           },
           securityContext,
         }
@@ -281,6 +352,8 @@ export async function POST(request: NextRequest) {
         session: authData.session,
         needs_email_verification: !authData.user.email_confirmed_at,
         family_joined: !!familyInvitation,
+        recovery_code: recoveryCode, // Include recovery code for user to save
+        verification_code_sent: true,
       };
 
       return createSuccessResponse(

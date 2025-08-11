@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { loginSchema } from '@/lib/validations/auth';
+import crypto from 'crypto';
 import { 
   withAuth, 
   createErrorResponse, 
@@ -11,10 +12,7 @@ import {
   AuthError, 
   getSecurityContext,
   logAuditEvent,
-  sanitizeEmail,
-  createUserSession,
-  getUserProfile,
-  getUserFamilies
+  sanitizeEmail
 } from '@/lib/auth/utils';
 import { rateLimiter } from '@/lib/auth/rate-limit';
 import { ZodError } from 'zod';
@@ -96,191 +94,88 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Attempt to sign in with Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password: validatedData.password,
-    });
-
-    if (authError) {
-      await rateLimiter.recordAttempt(
-        'auth:login',
-        securityContext.ip_address,
-        securityContext.user_agent,
-        false,
-        email
+    // Step 1: Check if user exists
+    const adminClient = createAdminClient();
+    const { data: existingUsers } = await adminClient.auth.admin.listUsers();
+    const foundUser = existingUsers?.users?.find(user => user.email === email);
+    
+    if (!foundUser) {
+      throw new AuthError(
+        'No account found with this email address',
+        'USER_NOT_FOUND',
+        404
       );
-
-      console.error('Supabase auth error:', authError instanceof Error ? authError.message : "Unknown error");
-      
-      // Log failed login attempt
-      await logAuditEvent(
-        'user_login_failed',
-        'authentication',
-        'User login attempt failed',
-        {
-          eventData: {
-            email,
-            error: authError.message,
-            ip_address: securityContext.ip_address,
-          },
-          severity: 'medium',
-          success: false,
-          securityContext,
-        }
+    }
+    
+    // Step 2: Generate 6-digit verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    
+    // Step 3: Store verification code in database
+    const { error: codeError } = await supabase
+      .from('email_verifications')
+      .upsert({
+        user_id: foundUser.id,
+        email: email,
+        token: crypto.randomUUID(),
+        verification_code: verificationCode,
+        type: 'login',
+        expires_at: expiresAt.toISOString()
+      }, {
+        onConflict: 'user_id,type'
+      });
+    
+    if (codeError) {
+      console.error('Failed to store verification code:', codeError);
+      throw new AuthError(
+        'Failed to generate verification code',
+        'CODE_GENERATION_FAILED',
+        500
       );
+    }
+    
+    // Step 4: Log email to console (instead of sending)
+    console.log('\n📧 EMAIL VERIFICATION CODE');
+    console.log('=====================================');
+    console.log(`To: ${email}`);
+    console.log(`Subject: Your FamilyHub Login Code`);
+    console.log('\n🔢 VERIFICATION CODE:', verificationCode);
+    console.log(`\n⏱️  Expires in: 10 minutes`);
+    console.log('=====================================\n');
+    
+    // Record successful code generation
+    await rateLimiter.recordAttempt(
+      'auth:login',
+      securityContext.ip_address,
+      securityContext.user_agent,
+      true,
+      email
+    );
 
-      // Map Supabase errors to user-friendly messages
-      let errorMessage = 'Invalid email or password';
-      let errorCode = 'INVALID_CREDENTIALS';
-      
-      if (authError.message.includes('email_not_confirmed')) {
-        errorMessage = 'Please verify your email address before signing in';
-        errorCode = 'EMAIL_NOT_VERIFIED';
-      } else if (authError.message.includes('invalid_credentials')) {
-        errorMessage = 'Invalid email or password';
-        errorCode = 'INVALID_CREDENTIALS';
-      } else if (authError.message.includes('too_many_requests')) {
-        errorMessage = 'Too many login attempts. Please try again later.';
-        errorCode = 'TOO_MANY_REQUESTS';
+    // Log successful code sent
+    await logAuditEvent(
+      'user_login_code_sent',
+      'authentication',
+      'Login verification code sent',
+      {
+        eventData: {
+          email,
+        },
+        securityContext,
       }
-      
-      throw new AuthError(errorMessage, errorCode, 401);
-    }
+    );
 
-    if (!authData.user || !authData.session) {
-      throw new AuthError('Login failed', 'LOGIN_FAILED', 401);
-    }
-
-    const userId = authData.user.id;
-
-    try {
-      // Get user profile
-      const profile = await getUserProfile(userId);
-      
-      // Get user families
-      const families = await getUserFamilies(userId);
-
-      // Create enhanced user session record
-      const sessionId = await createUserSession(
-        userId,
-        authData.session.access_token,
-        validatedData.device_info,
-        securityContext
-      );
-
-      // Record successful login attempt
-      await rateLimiter.recordAttempt(
-        'auth:login',
-        securityContext.ip_address,
-        securityContext.user_agent,
-        true,
-        email
-      );
-
-      // Clear any previous failed attempts for this IP
-      await rateLimiter.clearRateLimit('auth:login', securityContext.ip_address);
-
-      // Log successful login
-      await logAuditEvent(
-        'user_login',
-        'authentication',
-        'User logged in successfully',
-        {
-          actorUserId: userId,
-          eventData: {
-            email,
-            session_id: sessionId,
-            device_info: validatedData.device_info,
-            family_count: families.length,
-          },
-          securityContext,
-        }
-      );
-
-      // Prepare response data
-      const responseData = {
-        user: {
-          id: authData.user.id,
-          email: authData.user.email,
-          email_confirmed_at: authData.user.email_confirmed_at,
-          phone_confirmed_at: authData.user.phone_confirmed_at,
-          created_at: authData.user.created_at,
-          updated_at: authData.user.updated_at,
-        },
-        session: {
-          access_token: authData.session.access_token,
-          refresh_token: authData.session.refresh_token,
-          expires_at: authData.session.expires_at,
-          expires_in: authData.session.expires_in,
-          token_type: authData.session.token_type,
-        },
-        profile,
-        families: families.map((family: { id: string; name: string; family_type: string; timezone: string; user_role: string; is_family_admin: boolean }) => ({
-          id: family.id,
-          name: family.name,
-          family_type: family.family_type,
-          timezone: family.timezone,
-          role: family.user_role,
-          is_family_admin: family.is_family_admin,
-        })),
-        session_id: sessionId,
-      };
-
-      return createSuccessResponse(
-        responseData,
-        'Login successful',
-        200,
-        corsOptions
-      );
-
-    } catch (postLoginError) {
-      console.error('Post-login processing error:', postLoginError instanceof Error ? postLoginError.message : 'Unknown error');
-      
-      // Login was successful, so don't fail the request
-      // but log the error for investigation
-      await logAuditEvent(
-        'login_post_processing_error',
-        'authentication',
-        'Error in post-login processing',
-        {
-          actorUserId: userId,
-          eventData: {
-            error: postLoginError instanceof Error ? postLoginError.message : 'Unknown error',
-          },
-          severity: 'medium',
-          success: false,
-          securityContext,
-        }
-      );
-
-      // Return basic success response
-      return createSuccessResponse(
-        {
-          user: {
-            id: authData.user.id,
-            email: authData.user.email,
-            email_confirmed_at: authData.user.email_confirmed_at,
-            phone_confirmed_at: authData.user.phone_confirmed_at,
-            created_at: authData.user.created_at,
-            updated_at: authData.user.updated_at,
-          },
-          session: {
-            access_token: authData.session.access_token,
-            refresh_token: authData.session.refresh_token,
-            expires_at: authData.session.expires_at,
-            expires_in: authData.session.expires_in,
-            token_type: authData.session.token_type,
-          },
-          profile: null,
-          families: [],
-          session_id: null,
-        },
-        'Login successful',
-        200,
-        corsOptions
-      );
-    }
+    // Since we're doing passwordless, return that code was sent
+    return createSuccessResponse(
+      {
+        message: 'Verification code sent to your email',
+        email: email,
+        expiresIn: 600 // 10 minutes
+      },
+      'Verification code sent',
+      200,
+      corsOptions
+    );
 
   } catch (error) {
     console.error('Login error:', error);
