@@ -269,7 +269,7 @@ export async function POST(request: NextRequest) {
         // Don't throw here, as the user was created successfully
       }
 
-      // Handle family invitation if present
+      // Create default family for new users OR handle family invitation
       if (familyInvitation) {
         try {
           // Get the appropriate role for the user
@@ -314,6 +314,64 @@ export async function POST(request: NextRequest) {
         } catch (familyError) {
           console.error('Error processing family invitation:', familyError instanceof Error ? familyError.message : "Unknown error");
           // Don't throw here, user creation was successful
+        }
+      } else {
+        // No invitation - create a default family for the new user
+        try {
+          // Get family_coordinator role
+          const { data: coordinatorRole } = await supabase
+            .from('roles')
+            .select('id')
+            .eq('type', 'family_coordinator')
+            .single();
+
+          // Get Free tier
+          const { data: freeTier } = await supabase
+            .from('subscription_tiers')
+            .select('id')
+            .eq('name', 'free')
+            .single();
+
+          if (coordinatorRole && freeTier) {
+            // Create family with user's name or email
+            const familyName = validatedData.first_name 
+              ? `${validatedData.first_name}'s Family`
+              : `${email.split('@')[0]}'s Family`;
+
+            const { data: newFamily, error: familyCreateError } = await supabase
+              .from('families')
+              .insert({
+                name: familyName,
+                description: 'Welcome to your family coordination hub!',
+                timezone: 'America/New_York', // Default timezone
+                created_by: authData.user.id,
+                subscription_tier_id: freeTier.id,
+                status: 'active'
+              })
+              .select()
+              .single();
+
+            if (!familyCreateError && newFamily) {
+              // Add user as family coordinator
+              const { error: membershipError } = await supabase
+                .from('family_memberships')
+                .insert({
+                  family_id: newFamily.id,
+                  user_id: authData.user.id,
+                  role_id: coordinatorRole.id,
+                  status: 'active',
+                  is_default_family: true,
+                  display_name: `${validatedData.first_name || ''} ${validatedData.last_name || ''}`.trim() || email.split('@')[0]
+                });
+
+              if (!membershipError) {
+                console.log('Default family created successfully for new user');
+              }
+            }
+          }
+        } catch (familyError) {
+          console.error('Error creating default family:', familyError);
+          // Don't throw - this is not critical for signup
         }
       }
 

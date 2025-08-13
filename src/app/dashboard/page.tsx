@@ -268,10 +268,16 @@ function DashboardContent() {
                     </p>
                     <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                       <span className="text-xs text-slate-600 font-medium">
-                        Members: <span className="font-bold text-slate-800">{family.family_members?.length || 0}</span>
+                        Members: <span className="font-bold text-slate-800">{family.member_count || 1}</span>
                       </span>
-                      <button className="text-xs px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 font-semibold rounded-lg transition-colors">
-                        View →
+                      <button 
+                        onClick={() => router.push(`/family/${family.id}`)}
+                        className={`text-xs px-3 py-1 font-semibold rounded-lg transition-colors ${
+                          (family.member_count || 1) === 1 
+                            ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-700'
+                            : 'bg-purple-100 hover:bg-purple-200 text-purple-700'
+                        }`}>
+                        {(family.member_count || 1) === 1 ? 'Setup Family →' : 'View Family →'}
                       </button>
                     </div>
                   </div>

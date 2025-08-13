@@ -45,13 +45,8 @@ export async function GET(request: NextRequest) {
     // Get current authenticated user (more secure than getSession)
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
-    // Get session only if user is authenticated
-    const { data: { session }, error: sessionError } = user 
-      ? await supabase.auth.getSession()
-      : { data: { session: null }, error: null };
-    
-    if (authError || sessionError) {
-      console.error('Error getting user/session:', authError?.message || sessionError?.message || "Unknown error");
+    if (authError) {
+      console.error('Error getting user:', authError?.message || "Unknown error");
       
       if (authError) {
         await logAuditEvent(
@@ -83,8 +78,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // No active session
-    if (!user || !session || !session.user) {
+    // No active user
+    if (!user) {
       return createSuccessResponse(
         {
           authenticated: false,
@@ -99,7 +94,25 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const userId = session.user.id;
+    const userId = user.id;
+
+    // Now that we've verified the user, get the session for response data
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      return createSuccessResponse(
+        {
+          authenticated: false,
+          session: null,
+          user: null,
+          profile: null,
+          families: [],
+        },
+        'No active session',
+        200,
+        corsOptions
+      );
+    }
 
     try {
       // Get additional user data
@@ -123,7 +136,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Log session check (only for first check or periodic checks to avoid spam)
-      const sessionAge = Date.now() - new Date(session.expires_at || 0).getTime();
+      const sessionAge = session.expires_at ? Date.now() - new Date(session.expires_at).getTime() : 0;
       const shouldLog = sessionAge < 300000; // Only log if session is less than 5 minutes old
       
       if (shouldLog) {

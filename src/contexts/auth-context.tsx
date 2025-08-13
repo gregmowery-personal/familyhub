@@ -72,10 +72,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Initialize auth state from Supabase
   const initializeAuth = useCallback(async () => {
     try {
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      // Use getUser() for security - it verifies the token with Supabase Auth server
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
       
-      if (currentSession) {
-        setSession(currentSession);
+      if (currentUser) {
+        // Only get session after confirming user is authenticated
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (currentSession) {
+          setSession(currentSession);
+        }
         
         // Get additional user data from our API
         const sessionResponse = await AuthService.getSession();
